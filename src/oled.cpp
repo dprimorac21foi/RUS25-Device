@@ -9,6 +9,7 @@ void setupOLED() {
         Serial.println("SSD1306 alokacija nije uspjela!");
         while (1);
     }
+    Serial.println("OLED Alokacija uspješna!");
     display.clearDisplay();
     display.setTextSize(1);
     display.setTextColor(WHITE);

@@ -1,29 +1,33 @@
 #include <Arduino.h>
 #include "oled.h"
-#include "esp32cam.h"
+#include "camera.h"
 
 
-void setup() {
-    Serial.begin(115200);
+void setup() { 
 
-    if (setupCamera()) {
-      displayMessage("Camera Initialized +");
-    } else {
-      Serial.println("Camera failed to initialize. Restarting in 5 seconds...");
-      delay(5000);
-      ESP.restart();
-    } 
+  Serial.begin(115200);
 
-    setupOLED();
-    delay(4000);
-    displayMessage("Setting up camera...");
-    delay(2000);
+  // Setupa OLED zaslon, te ako je dobro setupan ispisuje poruku na OLED
+  setupOLED();
+  delay(3000);
 
-    delay(2000);
-
-    
+  // Setupa kameru te ispisuje rezultat na OLED
+  if (setupCamera())
+    displayMessage("Kamera radi!");
+  else
+    displayMessage("Kamera ne radi!");
 }
 
 void loop() {
-    
+
+  if (Serial.available() && Serial.read() == 't') {
+    if (captureImage()) {
+      displayMessage("Slika uhvacena!");
+      delay(3000);
+      freeCameraBuffer();
+    }
+    else  
+      displayMessage("Slika nije uhvacena!");
+  }
+  delay(100);
 }
