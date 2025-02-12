@@ -54,6 +54,9 @@ bool captureImage() {
         return false;
     }
     Serial.println("Image captured successfully");
+    Serial.println("Image size: ");
+    Serial.print(fb->len);
+    Serial.println(" bytes!");
     return true;
 }
 
