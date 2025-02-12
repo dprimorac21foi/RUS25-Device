@@ -4,142 +4,166 @@
 #include <WiFi.h>
 #include <time.h>
 #include "base64.h"
+#include <WiFiClientSecure.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
+#include "AzIoTSasToken.h"
+#include "SerialLogger.h"
+#include <az_core.h>
+#include <az_iot.h>
 
-// Wi-Fi podaci 
+// Wi-Fi Credentials
 const char* ssid = "HUAWEI_B535_1750";  
 const char* password = "DGA9Q9N5M0F";   
 
-// IoT Hub podaci
-char* iotHubHost = "iot-hub-rus-dprimorac.azure-devices.net";  
-char* deviceId = "esp32cam-dprimorac";  
-char* deviceKey = "cCz4jKtXkDn+GkJQ/Rf5U7WhDPEps6TP+KZwLYL+r5g="; 
+// IoT Hub Credentials
+const char* iotHubHost = "iot-hub-rus-dprimorac.azure-devices.net";  
+const char* deviceId = "esp32cam-dprimorac";  
+const char* deviceKey = "cCz4jKtXkDn+GkJQ/Rf5U7WhDPEps6TP+KZwLYL+r5g="; 
 
-// MQTT i SaS
-char mqttClientId[64];
-char mqttUsername[128];
-char mqttPasswordBuffer[200];
-uint8_t sasSignatureBuffer[256];
+// MQTT Authentication Buffers
+char mqttClientId[64], mqttUsername[128], mqttPasswordBuffer[256], sasSignatureBuffer[256];
 
-// Slanje slike na IoT Hub
-void createJson()
-{
+// Networking
+WiFiClientSecure wifiClient;
+PubSubClient mqtt(wifiClient);
+
+// SAS Token Object
+az_iot_hub_client client;
+AzIoTSasToken sasToken(
+  &client,
+  az_span_create_from_str((char*)deviceKey),
+  AZ_SPAN_FROM_BUFFER(sasSignatureBuffer),
+  AZ_SPAN_FROM_BUFFER(mqttPasswordBuffer)
+);
+
+// Function to Initialize Time
+void initializeTime() {
+    Logger.Info("Setting time using SNTP...");
+    configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+
+    time_t now = time(nullptr);
+    while (now < 1704067200) { // Wait until time is valid
+        delay(500);
+        now = time(nullptr);
+    }
+
+    Logger.Info("Time successfully set!");
+}
+
+// Function to Connect to WiFi
+void connectWifi() {
+    WiFi.begin(ssid, password);
+    Logger.Info("Connecting to WiFi...");
+
+    int timeoutCounter = 0;
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(500);
+        if (++timeoutCounter > 20) {
+            Logger.Error("Wi-Fi connection failed, restarting...");
+            ESP.restart();
+        }
+    }
+
+    Logger.Info("WiFi connected, IP: " + WiFi.localIP().toString());
+}
+
+// Function to Connect to MQTT
+bool connectMQTT() {
+    Logger.Info("Generating SAS token...");
+    if (sasToken.Generate(3600) != 0) { 
+        Logger.Error("Failed to generate SAS token!");
+        return false;
+    }
+
+    snprintf(mqttUsername, sizeof(mqttUsername), "%s/%s/?api-version=2021-04-12",
+             iotHubHost, deviceId);
+    snprintf(mqttClientId, sizeof(mqttClientId), "%s", deviceId);
+    
+    Logger.Info("Connecting to Azure IoT Hub via MQTT...");
+    mqtt.setServer(iotHubHost, 8883);
+
+    while (!mqtt.connected()) {
+        if (mqtt.connect(mqttClientId, mqttUsername, (const char*)az_span_ptr(sasToken.Get()))) {
+            Logger.Info("Connected to Azure IoT Hub!");
+            mqtt.subscribe(AZ_IOT_HUB_CLIENT_C2D_SUBSCRIBE_TOPIC);
+            return true;
+        } else {
+            Logger.Error("MQTT connection failed, retrying...");
+            delay(5000);
+        }
+    }
+    return false;
+}
+
+// Function to Send Image Data to Azure IoT Hub
+void sendPicture() {
   camera_fb_t* slika = captureImage();
   String base64Image = base64::encode(slika->buf, slika->len);
-  DynamicJsonDocument doc(8192);
   freeCameraBuffer(slika);
 
-  doc["link"] = "Blabla"; 
-  doc["image"] = base64Image; 
-  doc["timestamp"] = "xyz";  
+  DynamicJsonDocument doc(8192);
+  doc["deviceId"] = deviceId;
+  doc["image"] = base64Image;
+  doc["timestamp"] = millis();
 
   String jsonString;
   serializeJson(doc, jsonString);
-  Serial.println(jsonString);
+
+  Logger.Info("Sending image data to Azure...");
+  mqtt.publish(("devices/" + String(deviceId) + "/messages/events/").c_str(), jsonString.c_str());
 }
 
-// Postavljanje trenutnog vremena
+// Function to Handle Cloud-to-Device Messages
+void mqttCallback(char* topic, byte* payload, unsigned int length) {
+    payload[length] = '\0';
+    String message = String((char*)payload);
 
-void initializeTime() {
-  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
-  Serial.print("Waiting for NTP time sync: ");
-  tm tm{}; 
-  tm.tm_year = 2024;
-  time_t now = time(nullptr);
-  while (now < 100000) {
-      delay(500);
-      Serial.print(".");
-      now = time(nullptr);
-  }
-  Serial.println("Time synchronized!");
+    Logger.Info("Message received: " + message);
+    
+    if (message == "capture") {
+        sendPicture();
+    }
 }
 
+// Setup Function
+void setup() {
+    Serial.begin(115200);
+    setupOLED();
+    delay(3000);
 
-/* Spajanje na MQTT i generiranje tokena
-void connectMQTT() {
-  Serial.println("Generiranje SAS tokena..");
-
-  if (sasToken.Generate(3600) != 0) { 
-      Serial.println("Failed to generate SAS token!");
-      return;
-  }
-  String sasTokenStr = String(reinterpret_cast<const char*>(az_span_ptr(sasToken.Get())));
-
-  snprintf(mqttUsername, sizeof(mqttUsername), "%s/%s/?api-version=2021-04-12",
-           iotHubHost, deviceId);
-
-  snprintf(mqttClientId, sizeof(mqttClientId), "%s", deviceId);
-  
-  Serial.println("Connecting to Azure IoT Hub via MQTT...");
-  mqtt.setServer(iotHubHost, 8883);
-  while (!mqtt.connected()) {
-      Serial.print("Attempting MQTT connection... ");
-      if (mqtt.connect(mqttClientId, mqttUsername, sasTokenStr.c_str())) {
-          Serial.println("Connected to Azure IoT Hub!");
-      } else {
-          Serial.print("Failed, state: ");
-          Serial.println(mqtt.state());
-          Serial.println("Retrying in 5 seconds...");
-          delay(5000);
-      }
-  }
-}
-*/
-
-// Spajanje uređaja na Wi-Fi
-void connectWifi() {
-  
-  WiFi.begin(ssid, password);
-  Serial.print("Connecting to WiFi");
-  
-  int timeoutCounter=0;
-  // Wait for connection
-  while (WiFi.status() != WL_CONNECTED) {
-      delay(500);
-      Serial.print(".");
-
-      if (timeoutCounter > 20){
-        Serial.println("Neuspjelo spajanje na Wi-Fi, ponovno pokretanje...");
-        ESP.restart();
-      }
-  }
-  Serial.println("WiFi connected");
-  Serial.print("IP address: ");
-  Serial.println(WiFi.localIP());
-}
-
-
-void setup() { 
-
-  Serial.begin(115200);
-
-  // Setupa OLED zaslon, te ako je dobro setupan ispisuje poruku na OLED
-  setupOLED();
-  delay(3000);
-
-  //Spajanje na Wi-Fi
-  connectWifi();
-  displayMessage("Povezano na Wi-Fi!");
-  delay(3000);
-  // initializeTime();
-
-  // Setupa kameru te ispisuje rezultat na OLED
-  if (setupCamera())
-    displayMessage("Kamera radi!");
-  else
-    displayMessage("Kamera ne radi!");
-}
-
-void loop() {
-
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("WiFi connection lost! Reconnecting...");
     connectWifi();
-  }
+    displayMessage("Connected to WiFi!");
+    delay(3000);
 
-  if (Serial.available() && Serial.read() == 't') {
-    createJson();
-  }
-  delay(100);
+    initializeTime();
+
+    if (setupCamera()) {
+        displayMessage("Camera working!");
+    } else {
+        displayMessage("Camera not working!");
+    }
+
+    mqtt.setCallback(mqttCallback);
+    connectMQTT();
+}
+
+// Loop Function
+void loop() {
+    if (WiFi.status() != WL_CONNECTED) {
+        Logger.Error("WiFi lost! Reconnecting...");
+        connectWifi();
+    }
+
+    if (!mqtt.connected()) {
+        Logger.Error("MQTT lost! Reconnecting...");
+        connectMQTT();
+    }
+
+    mqtt.loop();
+
+    if (Serial.available() && Serial.read() == 't') {
+        sendPicture();
+    }
+    delay(100);
 }
