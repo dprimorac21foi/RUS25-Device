@@ -19,8 +19,6 @@ void setupOLED() {
 
 void displayMessage(const char* message) {
     display.clearDisplay();
-    display.setTextSize(1);
-    display.setTextColor(WHITE);
     display.println(message);
     display.display();
 }
