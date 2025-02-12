@@ -2,6 +2,8 @@
 #include "oled.h"
 #include "camera.h"
 #include <WiFi.h>
+#include <time.h>
+#include "base64.h"
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 
@@ -21,17 +23,38 @@ char mqttPasswordBuffer[200];
 uint8_t sasSignatureBuffer[256];
 
 // Slanje slike na IoT Hub
-void createJson(const char* base64Image, const char* timestamp){
+void createJson()
+{
+  camera_fb_t* slika = captureImage();
+  String base64Image = base64::encode(slika->buf, slika->len);
   DynamicJsonDocument doc(8192);
+  freeCameraBuffer(slika);
 
-  doc["link"] = "http://yourserver.com/image_upload"; 
+  doc["link"] = "Blabla"; 
   doc["image"] = base64Image; 
-  doc["timestamp"] = timestamp;  
+  doc["timestamp"] = "xyz";  
 
   String jsonString;
   serializeJson(doc, jsonString);
   Serial.println(jsonString);
 }
+
+// Postavljanje trenutnog vremena
+
+void initializeTime() {
+  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+  Serial.print("Waiting for NTP time sync: ");
+  tm tm{}; 
+  tm.tm_year = 2024;
+  time_t now = time(nullptr);
+  while (now < 100000) {
+      delay(500);
+      Serial.print(".");
+      now = time(nullptr);
+  }
+  Serial.println("Time synchronized!");
+}
+
 
 /* Spajanje na MQTT i generiranje tokena
 void connectMQTT() {
@@ -99,6 +122,7 @@ void setup() {
   connectWifi();
   displayMessage("Povezano na Wi-Fi!");
   delay(3000);
+  // initializeTime();
 
   // Setupa kameru te ispisuje rezultat na OLED
   if (setupCamera())
@@ -115,13 +139,7 @@ void loop() {
   }
 
   if (Serial.available() && Serial.read() == 't') {
-    if (captureImage()) {
-      displayMessage("Slika uhvacena!");
-      delay(3000);
-      freeCameraBuffer();
-    }
-    else  
-      displayMessage("Slika nije uhvacena!");
+    createJson();
   }
   delay(100);
 }

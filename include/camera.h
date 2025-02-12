@@ -24,7 +24,7 @@
 
 // Function prototypes
 bool setupCamera();
-bool captureImage();
-void freeCameraBuffer();
+camera_fb_t* captureImage();
+void freeCameraBuffer(camera_fb_t* &fb);
 
 #endif // CAMERA_H

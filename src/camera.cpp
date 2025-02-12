@@ -1,4 +1,5 @@
 #include "camera.h"
+#include "esp_camera.h"
 
 // Global frame buffer pointer
 static camera_fb_t * fb = NULL;
@@ -40,23 +41,25 @@ bool setupCamera() {
     return true;
 }
 
-bool captureImage() {
-    fb = esp_camera_fb_get();
+camera_fb_t* captureImage() {
+    camera_fb_t* fb = esp_camera_fb_get();
     if (!fb) {
         Serial.println("Image capture failed");
-        return false;
+        return nullptr;
     }
     Serial.println("Image captured successfully");
     Serial.println("Image size: ");
     Serial.print(fb->len);
     Serial.println(" bytes!");
-    return true;
+    return fb;
 }
 
-void freeCameraBuffer() {
-    if (fb) {
+void freeCameraBuffer(camera_fb_t* &fb) {
+    if (fb) {  
         esp_camera_fb_return(fb);
-        fb = NULL;
+        fb = NULL;  
         Serial.println("Camera buffer freed");
+    } else {
+        Serial.println("Camera buffer is already NULL");
     }
 }
